@@ -1,5 +1,3 @@
-# AI-Study-Podcast-Creator-project
-AI-powered study podcast creator using course materials.
 from flask import Flask, request, render_template_string, jsonify, send_from_directory
 from pypdf import PdfReader
 from gtts import gTTS
@@ -132,4 +130,110 @@ HTML = """
                 </audio>
 
                 <p>
-                    <a href="{{ audio_url }}" downl
+                    <a href="{{ audio_url }}" download>
+                        Download Podcast Audio
+                    </a>
+                </p>
+            {% else %}
+                <p>Audio generation failed. Check your internet connection.</p>
+            {% endif %}
+        </div>
+    {% endif %}
+
+</div>
+</body>
+</html>
+"""
+
+
+def extract_text(pdf_file):
+    reader = PdfReader(pdf_file)
+    return "\n".join(page.extract_text() or "" for page in reader.pages)
+
+
+def generate_summary(text):
+    sentences = re.split(r"(?<=[.!?])\s+", " ".join(text.split()))
+
+    useful_sentences = [
+        sentence.strip()
+        for sentence in sentences
+        if len(sentence.strip()) > 20
+    ]
+
+    return " ".join(useful_sentences[:6])
+
+
+def generate_podcast_script(summary, topic):
+    return (
+        f"Welcome to the AI Study Podcast. "
+        f"Today, we are learning about {topic}. "
+        f"Let's understand the important concepts. "
+        f"{summary} "
+        "For revision, remember the key concepts and review your course notes. "
+        "Thank you for listening. Keep learning and keep growing."
+    )
+
+
+@app.route("/", methods=["GET", "POST"])
+def home():
+    if request.method == "POST":
+        pdf = request.files.get("pdf")
+        topic = request.form.get("topic", "Study Material").strip()
+
+        if not pdf or not pdf.filename:
+            return render_template_string(
+                HTML, error="Please upload a PDF file."
+            )
+
+        if not pdf.filename.lower().endswith(".pdf"):
+            return render_template_string(
+                HTML, error="Only PDF files are supported."
+            )
+
+        try:
+            text = extract_text(pdf)
+        except Exception:
+            return render_template_string(
+                HTML, error="Unable to read the PDF. Please try another file."
+            )
+
+        if not text.strip():
+            return render_template_string(
+                HTML,
+                error="No readable text found. Scanned PDFs are not supported."
+            )
+
+        text = text[:12000]
+
+        summary = generate_summary(text)
+        script = generate_podcast_script(summary, topic)
+
+        audio_filename = f"podcast_{uuid.uuid4().hex}.mp3"
+        audio_path = os.path.join("generated_audio", audio_filename)
+
+        audio_url = None
+
+        try:
+            speech = gTTS(text=script, lang="en")
+            speech.save(audio_path)
+            audio_url = f"/audio/{audio_filename}"
+        except Exception:
+            pass
+
+        return render_template_string(
+            HTML,
+            summary=summary,
+            script=script,
+            audio_url=audio_url
+        )
+
+    return render_template_string(HTML)
+
+
+@app.route("/audio/<path:filename>")
+def play_audio(filename):
+    return send_from_directory("generated_audio", filename)
+
+
+if __name__ == "__main__":
+    app.run(debug=True) 
